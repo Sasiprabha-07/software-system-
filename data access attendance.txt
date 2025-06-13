@@ -1,0 +1,99 @@
+package com.ams.dao;
+
+import com.ams.model.Attendance;
+import java.sql.*;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+
+public class AttendanceDao {
+
+    public boolean markCheckIn(int userId, String status) throws SQLException {
+        String sql = "INSERT INTO attendance (user_id, check_in_time, status) VALUES (?, ?, ?)";
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, userId);
+            pstmt.setTimestamp(2, Timestamp.valueOf(LocalDateTime.now()));
+            pstmt.setString(3, status);
+            return pstmt.executeUpdate() > 0;
+        }
+    }
+
+    public boolean markCheckOut(int userId, LocalDateTime checkInTime) throws SQLException {
+        // Finds the latest check-in for the user on the given day that hasn't been checked out yet
+        String sql = "UPDATE attendance SET check_out_time = ?, status = ? WHERE user_id = ? AND DATE(check_in_time) = DATE(?) AND check_out_time IS NULL ORDER BY check_in_time DESC LIMIT 1";
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setTimestamp(1, Timestamp.valueOf(LocalDateTime.now()));
+            pstmt.setString(2, "Present"); // Assuming check-out completes "Present" status
+            pstmt.setInt(3, userId);
+            pstmt.setTimestamp(4, Timestamp.valueOf(checkInTime)); // Use checkInTime's date part
+            return pstmt.executeUpdate() > 0;
+        }
+    }
+    
+    public Attendance getLatestCheckInForUserToday(int userId) throws SQLException {
+        String sql = "SELECT attendance_id, user_id, check_in_time, check_out_time, status FROM attendance WHERE user_id = ? AND DATE(check_in_time) = CURDATE() AND check_out_time IS NULL ORDER BY check_in_time DESC LIMIT 1";
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, userId);
+            ResultSet rs = pstmt.executeQuery();
+            if (rs.next()) {
+                return mapResultSetToAttendance(rs);
+            }
+        }
+        return null;
+    }
+
+
+    public List<Attendance> getAttendanceByDate(LocalDate date) throws SQLException {
+        List<Attendance> attendanceRecords = new ArrayList<>();
+        String sql = "SELECT a.attendance_id, a.user_id, u.name as user_name, a.check_in_time, a.check_out_time, a.status FROM attendance a JOIN users u ON a.user_id = u.user_id WHERE DATE(a.check_in_time) = ?";
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setDate(1, Date.valueOf(date));
+            ResultSet rs = pstmt.executeQuery();
+            while (rs.next()) {
+                attendanceRecords.add(mapResultSetToAttendanceWithUserName(rs));
+            }
+        }
+        return attendanceRecords;
+    }
+
+    public List<Attendance> getAttendanceByUserIdAndMonth(int userId, int year, int month) throws SQLException {
+        List<Attendance> attendanceRecords = new ArrayList<>();
+        String sql = "SELECT attendance_id, user_id, check_in_time, check_out_time, status FROM attendance WHERE user_id = ? AND YEAR(check_in_time) = ? AND MONTH(check_in_time) = ?";
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, userId);
+            pstmt.setInt(2, year);
+            pstmt.setInt(3, month);
+            ResultSet rs = pstmt.executeQuery();
+            while (rs.next()) {
+                attendanceRecords.add(mapResultSetToAttendance(rs));
+            }
+        }
+        return attendanceRecords;
+    }
+
+    // Helper methods to map ResultSet to Attendance object
+    private Attendance mapResultSetToAttendance(ResultSet rs) throws SQLException {
+        Attendance attendance = new Attendance();
+        attendance.setAttendanceId(rs.getInt("attendance_id"));
+        attendance.setUserId(rs.getInt("user_id"));
+        attendance.setCheckInTime(rs.getTimestamp("check_in_time").toLocalDateTime());
+        Timestamp checkOutTimestamp = rs.getTimestamp("check_out_time");
+        if (checkOutTimestamp != null) {
+            attendance.setCheckOutTime(checkOutTimestamp.toLocalDateTime());
+        }
+        attendance.setStatus(rs.getString("status"));
+        return attendance;
+    }
+
+    private Attendance mapResultSetToAttendanceWithUserName(ResultSet rs) throws SQLException {
+        Attendance attendance = mapResultSetToAttendance(rs);
+        attendance.setUserName(rs.getString("user_name"));
+        return attendance;
+    }
+}
